@@ -11,12 +11,14 @@ LIBS += `pkg-config --libs htslib`
 CXXFLAGS += `pkg-config --cflags zlib`
 LIBS += `pkg-config --libs zlib`
 
-CXXFLAGS += -g
+# CXXFLAGS += -g
 
-all: vcf-pileup
+targets = vcf-pileup
+
+all: $(targets)
 
 clean:
-	$(RM) vcf-pileup
+	$(RM) $(targets)
 
 %: %.cc
 	$(CXX) $(CXXFLAGS) -o $@ $< $(LIBS)

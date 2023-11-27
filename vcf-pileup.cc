@@ -529,7 +529,7 @@ public:
 					;
 				else
 				{
-					static const char *const expect[] = { "CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT" };
+					static const char *const expect[] = { "CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO" };
 
 					tokenize(_fields, string_view{ &*_line.begin() + 1, &*_line.end() }, '\t');
 					if (!(_fields.size() >= countof(expect) && std::equal(
@@ -641,6 +641,35 @@ equal_nt_seq(Iterator1 it1, Iterator1 end1, Iterator2 it2)
 	return true;
 }
 
+static
+string_view
+basename(string_view path)
+{
+	const char *p = &*path.begin();
+	const char *q = &*path.end();
+
+	while (p != q && q[-1] == '/')
+		--q;
+	for (const char *z = p; z != q; ++z)
+		if (*z == '/')
+			p = &z[1];
+
+	return string_view{ p, q };
+}
+
+static
+std::pair<string_view, string_view>
+splitext(string_view path)
+{
+	const char *p = path.begin();
+
+	for (const char *z = p; z != path.end(); ++z)
+		if (*z == '.')
+			p = z;
+
+	return std::make_pair( string_view{ path.begin(), p }, string_view{ p, path.end() } );
+}
+
 } // (anonymous)
 
 #include <cstdio>
@@ -651,14 +680,17 @@ equal_nt_seq(Iterator1 it1, Iterator1 end1, Iterator2 it2)
 int
 main(int argc, char **argv)
 {
+	bool header = false;
+	bool illumina13 = false;
 	std::uint8_t min_mq = 0;
 	std::uint8_t min_bq = 13;
-	bool illumina13 = false;
 
 	array_view<const char *const> args{ &argv[1], &argv[argc] };
 
 	for (; args.end() - args.begin() >= 1 && ( *args.begin() )[0] == '-'; args = { args.begin() + 1, args.end() })
-		     if (string_view( *args.begin() ).str() == "-6")
+		     if (string_view( *args.begin() ).str() == "-h")
+			header = true;
+		else if (string_view( *args.begin() ).str() == "-6")
 			illumina13 = true;
 		else if (string_view( *args.begin() ).str() == "-q")
 		{
@@ -680,7 +712,7 @@ main(int argc, char **argv)
 	if (args.end() - args.begin() < 2)
 	{
 usage:
-		std::fprintf(stderr, "Usage: %s [-6] [-q mq] [-Q bq] input.vcf input.bam [...]" "\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s [-h] [-6] [-q mq] [-Q bq] input.vcf input.bam [...]" "\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -707,26 +739,29 @@ usage:
 	}
 
 	{
+		if (header)
+		{
+			std::printf("##fileformat=VCFv4.1\n");
+
+			std::printf("##FORMAT=<ID=AD,Number=R,Type=Integer,Description=\"Read depth uniquely matching each allele\">\n");
+			std::printf("##FORMAT=<ID=ADF,Number=R,Type=Integer,Description=\"Read depth in the forward strand\">\n");
+//			std::printf("##FORMAT=<ID=ADR,Number=R,Type=Integer,Description=\"Read depth in the backward strand\">\n");
+			std::printf("##FORMAT=<ID=XD,Number=1,Type=Integer,Description=\"Extra number of reads ambiguously matching alleles\">\n");
+			std::printf("##FORMAT=<ID=XDF,Number=1,Type=Integer,Description=\"Extra reads in the forward strand\">\n");
+//			std::printf("##FORMAT=<ID=XDR,Number=1,Type=Integer,Description=\"Extra reads in the backward strand\">\n");
+			std::printf("##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth (quality filtered, regardless of allele)\">\n");
+			std::printf("##FORMAT=<ID=DPF,Number=1,Type=Integer,Description=\"Read depth in the forward strand\">\n");
+//			std::printf("##FORMAT=<ID=DPR,Number=1,Type=Integer,Description=\"Read depth in the backward strand\">\n");
+			std::printf("##FORMAT=<ID=RDP,Number=1,Type=Integer,Description=\"Raw read depth (unfiltered)\">\n");
+
+			// TODO: print program version/date
+		}
+
 		std::printf("#" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s",
 			"CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT");
 
-		auto stem = [](string_view fn) {
-			const char *p = fn.begin();
-			const char *q = fn.end();
-
-			for (const char& ch : fn)
-				if (ch == '/')
-					p = &(&ch)[1];
-
-			for (const char& ch : string_view{ p, fn.end() })
-				if (ch == '.')
-					q = &ch;
-
-			return string_view{ p, q };
-		};
-
 		for (const char *bam_fn : bam_fns)
-			std::printf("\t" "%s", stem(bam_fn).str().c_str());
+			std::printf("\t" "%s", splitext(basename(bam_fn)).first.str().c_str());
 
 		std::printf("\n");
 	}
