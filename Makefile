@@ -1,5 +1,5 @@
 
-CC = cc -ansi
+CC = cc -std=c99
 CXX = c++ -std=c++11
 RM = rm -f
 
