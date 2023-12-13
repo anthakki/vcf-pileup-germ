@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+
+import gzip
+import io
+import collections
+
+def gzopen_r(path, mode = 'r'):
+	file = open(path, 'rb')
+
+	if file.peek(2)[:2] == b'\x1f\x8b':
+		file = gzip.GzipFile( fileobj = file, mode = 'rb' )
+	if 'b' not in mode:
+		file = io.TextIOWrapper(file)
+
+	return file
+
+def chomp(line):
+	if line.endswith('\n'):
+		line = line[:-1]
+	if line.endswith('\r'):
+		line = line[:-1]
+
+	return line
+
+def chomp_from(stream):
+	for line in stream:
+		yield chomp(line)
+
+class VCFParser:
+	_VCF_HEAD = ('CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT')
+
+	@classmethod
+	def is_sample_field(clazz, head):
+		return head not in clazz._VCF_HEAD
+
+	def __init__(self, stream):
+		self._gen = chomp_from(stream)
+
+		self.comm = []
+		self.head = None
+
+		for line in self._gen:
+			if line.startswith('##'):
+				self.comm.append( line )
+			elif line.startswith('#'):
+				self.head = line[1:].split('\t')
+				break
+			else:
+				raise Exception('missing VCF header')
+
+		if not tuple( self.head[:len(self._VCF_HEAD)] ) == self._VCF_HEAD:
+			raise Exception('invalid VCF header')
+
+	def __iter__(self):
+		for line in self._gen:
+			data = line.split('\t')
+			assert len(data) == len(self.head)
+
+			yield data
+
+def parse_format(str):
+	if str != '.':
+		return str.split(':')
+	else:
+		return []
+
+def make_format(args):
+	if len(args) > 0:
+		return ':'.join(args)
+	else:
+		return '.'
+
+def parse_list(args):
+	return args.split(',')
+
+def make_list(args):
+	return ','.join(args)
+
+def is_list(arg):
+	return ',' in arg
+
+def is_int(arg):
+	try:
+		_ = int(arg)
+	except ValueError:
+		return False
+	return True
+
+def is_float(arg):
+	try:
+		_ = float(arg)
+	except ValueError:
+		return False
+	return True
+
+def template_any(arg):
+	if is_list(arg):
+		return make_list( template_any(arg) for arg in parse_list(arg) )
+	elif is_int(arg):
+		return '0'
+	elif is_float(arg):
+		return '0.0'
+	else:
+		return '.'
+
+def template_format(args):
+	return [ template_any(arg) for arg in args ]
+
+if __name__ == '__main__':
+	import sys
+
+	header = False
+	args = sys.argv[1:]
+
+	if len(args) > 0 and args[0] == '-h':
+		header = True
+		args = args[1:]
+
+	if len(args) < 2:
+		sys.stderr.write(f'Usage: { sys.argv[0] } [-h] input.vcf sample [...]' + '\n')
+		sys.exit(1)
+
+	input_fn, use_samples = args[0], args[1:]
+
+	with gzopen_r(input_fn, 'r') as stream:
+		parser = VCFParser(stream)
+
+		if header:
+			for line in parser.comm:
+				sys.stdout.write( line + '\n' )
+
+		new_head = [ key for key in parser.head if not parser.is_sample_field(key) ] + use_samples
+		sys.stdout.write( '#' + '\t'.join(new_head) + '\n' )
+
+		for line in parser:
+			new_line = []
+			sample_data = collections.OrderedDict()
+			sample_template = '.'
+
+			for key, val in zip(parser.head, line):
+				if not parser.is_sample_field(key):
+					new_line.append( val )
+				else:
+					sample_data[key] = val
+					sample_template = make_format( template_format( parse_format(val) ) )
+
+			for key in use_samples:
+				if key in sample_data:
+					new_line.append( sample_data[key] )
+				else:
+					new_line.append( sample_template )
+
+			sys.stdout.write( '\t'.join(new_line) + '\n' )
