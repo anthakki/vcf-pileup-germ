@@ -13,7 +13,9 @@ LIBS += `pkg-config --libs zlib`
 
 # CXXFLAGS += -g
 
-targets = vcf-pileup
+LIBS += -lpthread
+
+targets = vcf-pileup vcf-pileup-mt
 
 all: $(targets)
 
