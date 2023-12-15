@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /* Get joint likelihoods */ 
-void gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we, double me);
+void gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we, double me, size_t at);
 /* Get genotypic likelihoods */
 void gtbeta_22_gl(double *gl, const double *jl, size_t samples);
 /* Get genotype */

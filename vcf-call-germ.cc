@@ -621,7 +621,7 @@ splitext(string_view path)
 
 static
 void
-compute_GL_22(double *gl, const long *ad, std::size_t samples, double we, double me)
+compute_GL_22(double *gl, const long *ad, std::size_t samples, double we, double me, size_t at)
 {
 	std::size_t combs = 1;
 
@@ -629,7 +629,7 @@ compute_GL_22(double *gl, const long *ad, std::size_t samples, double we, double
 		combs *= 2*(2+1)/2;
 
 	std::vector<double> jl( combs );
-	gtbeta_22_jl( jl.data(), reinterpret_cast<const unsigned long *>(ad), samples, we, me );
+	gtbeta_22_jl( jl.data(), reinterpret_cast<const unsigned long *>(ad), samples, we, me, at );
 	gtbeta_22_gl( gl, jl.data(), samples );
 }
 
@@ -669,6 +669,7 @@ main(int argc, char **argv)
 	double we = -1.;
 	std::map<std::string, bool> germ_samples;
 	bool germ_default = false;
+	std::size_t approx_taper = std::size_t(-1);
 
 	array_view<const char *const> args{ &argv[1], &argv[argc] };
 
@@ -711,6 +712,13 @@ main(int argc, char **argv)
 
 			args = { args.begin() + 1, args.end() };
 		}
+		else if (string_view( *args.begin() ).str() == "-at")
+		{
+			if (parse_unsigned( approx_taper, string_view(*( args.begin() + 1 )) ))
+				args = { args.begin() + 1, args.end() };
+			else
+				goto usage;
+		}
 		else
 			goto usage;
 
@@ -720,7 +728,7 @@ main(int argc, char **argv)
 	if (args.end() - args.begin() != 1)
 	{
 usage:
-		std::fprintf(stderr, "Usage: %s [-h] [-e em] [-ew ew] [-s a,...] [-S a,...] input.vcf" "\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s [-h] [-e em] [-ew ew] [-s a,...] [-S a,...] [-at at] input.vcf" "\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -798,7 +806,7 @@ usage:
 		}
 
 		std::vector<std::array<double, 2*(2+1)/2> > gl{ ad.size() };
-		compute_GL_22( &gl[0][0], &ad[0][0], ad.size(), we, me );
+		compute_GL_22( &gl[0][0], &ad[0][0], ad.size(), we, me, approx_taper );
 
 		/* for (std::size_t i = 0; i < gl.size(); ++i)
 			std::fprintf(stderr, "sample #%zu GT=%s GL=%g,%g,%g AD=%lu,%lu\n", i+1, compute_GT_22( &gl[i][0] ), gl[i][0], gl[i][1], gl[i][2], ad[i][0], ad[i][1]); */

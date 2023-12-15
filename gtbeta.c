@@ -94,8 +94,18 @@ dec2base(size_t *d, size_t x, size_t b, size_t n)
 	}
 }
 
+static
+size_t
+taper_ord(size_t x, size_t t)
+{
+	if (x < t)
+		return x;
+	else
+		return t + (size_t)( t * log( 1 + (x-t)/t ) );
+}
+
 void
-gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we, double me)
+gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we, double me, size_t at)
 {
 	size_t combs, j, eord, pord, k, i, c, *inds;
 	unsigned long tot_dp, a, b;
@@ -123,10 +133,8 @@ gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we,
 		tot_dp += a + b;
 	}
 
-	/* TODO: optimize quadrature order - can be a bit lower*/
-
 	/* Make error quadrature */
-	eord = tot_dp + 1;
+	eord = taper_ord( ( tot_dp + 1 ) / 2, at );
 	ex = (double *)alloca( eord*2 * sizeof(*ex) );
 	ey = &ex[eord];
 	beta_rule(ex, ey, eord, we*me, we*(1.-me));
@@ -145,7 +153,7 @@ gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we,
 		a = ( &counts[2*j] )[1];
 
 		/* Make VAF quadrature */
-		pord = a + b + 1;
+		pord = taper_ord( ( a + b + 1 ) / 2, at );
 		unif_rule(px, py, pord);
 
 		/* Get 0/0 model */
