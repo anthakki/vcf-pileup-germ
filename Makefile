@@ -19,7 +19,7 @@ CXXFLAGS += -Weffc++
 
 LIBS += -lpthread
 
-targets = vcf-call-fs vcf-pileup vcf-pileup-mt
+targets = vcf-call-fs vcf-call-germ vcf-pileup vcf-pileup-mt
 
 all: $(targets)
 
@@ -32,7 +32,15 @@ clean:
 fishertest.o: fishertest.c fishertest.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+gtbeta.o: gtbeta.c gtbeta.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+jacobi_rule.o: jacobi_rule.c jacobi_rule.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 vcf-call-fs: vcf-call-fs.cc fishertest.o
+
+vcf-call-germ: vcf-call-germ.cc gtbeta.o jacobi_rule.o
 
 vcf-pileup: vcf-pileup.cc
 
