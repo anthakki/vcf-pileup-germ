@@ -640,12 +640,26 @@ compute_GT_22(const double *gl)
 	return gtbeta_22_gt(gl);
 }
 
+static
+bool
+gt_is_variant(const char *gt)
+{
+	// 0, 0/0, 0/0/0, ... => false , 0/1, 1/0, 1/1, 1|1, 1/1/1, 2/0/3 => true
+	for (const char *p = gt; *p != '\0'; ++p)
+		if ('0' <= *p && *p <= '9')
+			if (*p > '0')
+				return true;
+			
+	return false;
+}
+
 } // (anonymous)
 
 #include <cstdio>
 #include <cstdlib>
 #include <list>
 #include <map>
+#include <unordered_set>
 
 int
 main(int argc, char **argv)
@@ -653,6 +667,8 @@ main(int argc, char **argv)
 	bool header = false;
 	double me = 0.10;
 	double we = -1.;
+	std::map<std::string, bool> germ_samples;
+	bool germ_default = false;
 
 	array_view<const char *const> args{ &argv[1], &argv[argc] };
 
@@ -673,6 +689,28 @@ main(int argc, char **argv)
 			else
 				goto usage;
 		}
+		else if (string_view( *args.begin() ).str() == "-s")
+		{
+			std::vector<string_view> samples;
+
+			tokenize(samples, string_view(*( args.begin() + 1 )), ',');
+			for (const auto& sample : samples)
+				germ_samples.insert(germ_samples.end(), std::make_pair(sample.str(), true));
+			germ_default = false;
+
+			args = { args.begin() + 1, args.end() };
+		}
+		else if (string_view( *args.begin() ).str() == "-S")
+		{
+			std::vector<string_view> samples;
+
+			tokenize(samples, string_view(*( args.begin() + 1 )), ',');
+			for (const auto& sample : samples)
+				germ_samples.insert(germ_samples.end(), std::make_pair(sample.str(), false));
+			germ_default = true;
+
+			args = { args.begin() + 1, args.end() };
+		}
 		else
 			goto usage;
 
@@ -682,7 +720,7 @@ main(int argc, char **argv)
 	if (args.end() - args.begin() != 1)
 	{
 usage:
-		std::fprintf(stderr, "Usage: %s [-h] [-e em] [-ew ew] input.vcf" "\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s [-h] [-e em] [-ew ew] [-s a,...] [-S a,...] input.vcf" "\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -696,6 +734,7 @@ usage:
 	}
 
 	VCFReader vcf_reader{ vcf_fp };
+	std::vector<bool> germ_sample_mask;
 
 	{
 		if (header)
@@ -703,8 +742,16 @@ usage:
 			std::fwrite( vcf_reader.meta().begin(), 1, vcf_reader.meta().end() - vcf_reader.meta().begin(), stdout );
 			std::printf("##" "FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">" "\n");
 			std::printf("##" "FORMAT=<ID=GL,Number=G,Type=Float,Description=\"Genotype likelihoods\">" "\n");
+			std::printf("##" "INFO=<ID=GERMLINE,Number=0,Type=Flag,Description=\"Call for a germline variant\">" "\n");
 
 			// TODO: print program version/date
+		}
+
+		germ_sample_mask.clear();
+		for (string_view sample : vcf_reader.sample_fields())
+		{
+			auto it = germ_samples.find(sample.str());
+			germ_sample_mask.push_back( it != germ_samples.end() ? it->second : germ_default );
 		}
 
 		std::printf("%.*s\n", int( vcf_reader.line().end() - vcf_reader.line().begin() ), vcf_reader.line().begin());
@@ -756,6 +803,7 @@ usage:
 		/* for (std::size_t i = 0; i < gl.size(); ++i)
 			std::fprintf(stderr, "sample #%zu GT=%s GL=%g,%g,%g AD=%lu,%lu\n", i+1, compute_GT_22( &gl[i][0] ), gl[i][0], gl[i][1], gl[i][2], ad[i][0], ad[i][1]); */
 
+		bool is_germ = false;
 		std::list<std::string> string_cache;
 
 		{ std::size_t i = 0;
@@ -763,7 +811,12 @@ usage:
 		{
 			format.set_data(field);
 
-			string_cache.emplace_back( compute_GT_22( &gl[i][0] ) );
+			const char *gt = compute_GT_22( &gl[i][0] );
+
+			if (germ_sample_mask[i] && gt_is_variant(gt))
+				is_germ = true;
+
+			string_cache.emplace_back( gt );
 			format.set( "GT", string_cache.back() );
 
 			char GL_str[1024];
@@ -778,6 +831,14 @@ usage:
 
 		string_cache.emplace_back( format.head_str() );
 		vcf_reader.set_format( string_cache.back() );
+
+		if (is_germ)
+		{
+			info.set( "GERMLINE", "" );
+
+			string_cache.emplace_back( info.str() );
+			vcf_reader.set_info( string_cache.back() );
+		}
 
 		{
 		const char *sep = "";
