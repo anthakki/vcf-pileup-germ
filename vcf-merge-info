@@ -119,12 +119,19 @@ if __name__ == '__main__':
 	parsers = [ VCFParser(file) for file in files ]
 
 	def merge_comm(comm1, comm2):
-		if not comm2:
-			return comm1
-		elif not comm1:
-			return comm2
-		else:
-			assert not 'TODO: merge not implemented'
+		seen = collections.OrderedDict()
+		comm = []
+
+		for line in comm1:
+			seen[line] = True
+			comm.append(line)
+
+		for line in comm2:
+			if line not in seen:
+				seen[line] = True
+				comm.append(line)
+
+		return comm
 
 	if True:
 		for parser in parsers:
