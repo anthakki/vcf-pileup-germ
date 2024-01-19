@@ -461,6 +461,16 @@ public:
 		}
 	}
 
+	void unset(string_view key)
+	{
+		auto it = _index.find(key);
+		if (it != _index.end())
+		{
+			_fields.erase( _fields.begin() + it->second );
+			_index.erase(it);
+		}
+	}
+
 private:
 	VCFInfoString(const VCFInfoString&) = delete;
 	VCFInfoString& operator=(const VCFInfoString&) = delete;
@@ -840,9 +850,11 @@ usage:
 		string_cache.emplace_back( format.head_str() );
 		vcf_reader.set_format( string_cache.back() );
 
-		if (is_germ)
 		{
-			info.set( "GERMLINE", "" );
+			if (is_germ)
+				info.set( "GERMLINE", "" );
+			else
+				info.unset( "GERMLINE" );
 
 			string_cache.emplace_back( info.str() );
 			vcf_reader.set_info( string_cache.back() );
