@@ -631,7 +631,7 @@ splitext(string_view path)
 
 static
 void
-compute_GL_22(double *gl, const long *ad, std::size_t samples, double we, double me, size_t at)
+compute_GL_22(double *gl, const long *ad, const char *mut_mask, std::size_t samples, double we, double me, size_t at)
 {
 	std::size_t combs = 1;
 
@@ -640,6 +640,11 @@ compute_GL_22(double *gl, const long *ad, std::size_t samples, double we, double
 
 	std::vector<double> jl( combs );
 	gtbeta_22_jl( jl.data(), reinterpret_cast<const unsigned long *>(ad), samples, we, me, at );
+
+	for (std::size_t i = 0; i < samples; ++i)
+		if (mut_mask[i])
+			gtbeta_22_zap( jl.data(), samples, i, 0 );
+
 	gtbeta_22_gl( gl, jl.data(), samples );
 }
 
@@ -677,6 +682,7 @@ main(int argc, char **argv)
 	bool header = false;
 	double me = 0.10;
 	double we = -1.;
+	bool known_somatic = false;
 	std::map<std::string, bool> germ_samples;
 	bool germ_default = false;
 	std::size_t approx_taper = std::size_t(-1);
@@ -700,6 +706,8 @@ main(int argc, char **argv)
 			else
 				goto usage;
 		}
+		else if (string_view( *args.begin() ).str() == "-Z")
+			known_somatic = true;
 		else if (string_view( *args.begin() ).str() == "-s")
 		{
 			std::vector<string_view> samples;
@@ -815,8 +823,17 @@ usage:
 			}
 		}
 
+		std::vector<char> mut_mask;
+		{ std::size_t i = 0;
+		for (string_view field : vcf_reader.sample_fields())
+		{
+			std::ignore = field;
+			mut_mask.push_back( known_somatic && !germ_sample_mask[i++] );
+		}
+		}
+
 		std::vector<std::array<double, 2*(2+1)/2> > gl{ ad.size() };
-		compute_GL_22( &gl[0][0], &ad[0][0], ad.size(), we, me, approx_taper );
+		compute_GL_22( &gl[0][0], &ad[0][0], mut_mask.data(), ad.size(), we, me, approx_taper );
 
 		/* for (std::size_t i = 0; i < gl.size(); ++i)
 			std::fprintf(stderr, "sample #%zu GT=%s GL=%g,%g,%g AD=%lu,%lu\n", i+1, compute_GT_22( &gl[i][0] ), gl[i][0], gl[i][1], gl[i][2], ad[i][0], ad[i][1]); */

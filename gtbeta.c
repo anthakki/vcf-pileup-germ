@@ -74,10 +74,12 @@ static
 double
 logspace_add(double x, double y)
 {
-	if (!(x < y))
+	if (x > y)
 		return x + log1p(exp(y-x));
-	else
+	else if (y > x)
 		return y + log1p(exp(x-y));
+	else
+		return log( exp(x) + exp(y) );
 }
 
 static
@@ -230,6 +232,32 @@ gtbeta_22_jl(double *jl, const unsigned long *counts, size_t samples, double we,
 		/* Stash result */
 		jl[c] = u;
 	}
+}
+
+void
+gtbeta_22_zap(double *jl, size_t samples, size_t si, size_t gi)
+{
+	size_t s, b, combs, j, c;
+
+	assert(jl != NULL || samples < 1);
+	assert(si < samples);
+	assert(gi < 2*(2+1)/2);
+
+	/* Get base & stride */
+	s = 1;
+	b = 2*(2+1)/2;
+	for (j = 0; j < si; ++j)
+		s *= b;
+
+	/* Get number of genotype combinations */
+	combs = samples > 0;
+	for (j = 0; j < samples; ++j)
+		combs *= 2*(2+1)/2;
+
+	/* Loop through */
+	for (c = 0; c < combs; ++c)
+		if (c / s % b == gi)
+			jl[c] = -HUGE_VAL;
 }
 
 void
