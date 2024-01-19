@@ -633,8 +633,7 @@ static
 void
 compute_GL_22(double *gl, const long *ad, const char *mut_mask, std::size_t samples, double we, double me, size_t at)
 {
-	std::size_t combs = 1;
-
+	std::size_t combs = samples > 0;
 	for (std::size_t i = 0; i < samples; ++i)
 		combs *= 2*(2+1)/2;
 
@@ -643,9 +642,48 @@ compute_GL_22(double *gl, const long *ad, const char *mut_mask, std::size_t samp
 
 	for (std::size_t i = 0; i < samples; ++i)
 		if (mut_mask[i])
-			gtbeta_22_zap( jl.data(), samples, i, 0 );
+			gtbeta_zap( jl.data(), samples, i, 2*(2+1)/2, 0 );
 
 	gtbeta_22_gl( gl, jl.data(), samples );
+}
+
+static
+int
+compute_GL_22_and_bias(double *gl, const long *ad, const long *ad2, const char *mut_mask, std::size_t samples, double we, double me, size_t at)
+{
+	std::size_t combs = samples > 0;
+	for (std::size_t i = 0; i < samples; ++i)
+		combs *= 2*(2+1)/2;
+
+	std::vector<double> jl( combs );
+	gtbeta_22_jl( jl.data(), reinterpret_cast<const unsigned long *>(ad), samples, we, me, at );
+
+	for (std::size_t i = 0; i < samples; ++i)
+		if (mut_mask[i])
+			gtbeta_zap( jl.data(), samples, 2*(2+1)/2, i, 0 );
+
+	std::vector<double> jl2( combs*combs );
+	gtbeta_22_jl( jl2.data(), reinterpret_cast<const unsigned long *>(ad2), 2*samples, we, me, at );
+
+	for (std::size_t i = 0; i < samples; ++i)
+		if (mut_mask[i])
+			gtbeta_zap( jl2.data(), samples, 2*(2+1)/2 * 2*(2+1)/2, i, 0 );
+
+	double p1 = -HUGE_VAL;
+	for (std::size_t c = 0; c < combs; ++c)
+		if (jl[c] > p1)
+			p1 = jl[c];
+
+	double p2 = -HUGE_VAL;
+	for (std::size_t c = 0; c < combs; ++c)
+		if (jl2[c] > p2)
+			p2 = jl2[c];
+
+	bool strand_bias = p2 > p1;
+
+	gtbeta_22_gl( gl, jl.data(), samples );
+
+	return strand_bias;
 }
 
 static
@@ -682,6 +720,7 @@ main(int argc, char **argv)
 	bool header = false;
 	double me = 0.10;
 	double we = -1.;
+	bool check_bias = false;
 	bool known_somatic = false;
 	std::map<std::string, bool> germ_samples;
 	bool germ_default = false;
@@ -706,6 +745,8 @@ main(int argc, char **argv)
 			else
 				goto usage;
 		}
+		else if (string_view( *args.begin() ).str() == "-b")
+			check_bias = true;
 		else if (string_view( *args.begin() ).str() == "-Z")
 			known_somatic = true;
 		else if (string_view( *args.begin() ).str() == "-s")
@@ -746,7 +787,7 @@ main(int argc, char **argv)
 	if (args.end() - args.begin() != 1)
 	{
 usage:
-		std::fprintf(stderr, "Usage: %s [-h] [-e em] [-ew ew] [-s a,...] [-S a,...] [-at at] input.vcf" "\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s [-h] [-e em] [-ew ew] [-b] [-Z] [-s a,...] [-S a,...] [-at at] input.vcf" "\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -770,6 +811,9 @@ usage:
 			std::printf("##" "FORMAT=<ID=GL,Number=G,Type=Float,Description=\"Genotype likelihoods\">" "\n");
 			std::printf("##" "INFO=<ID=GERMLINE,Number=0,Type=Flag,Description=\"Call for a germline variant\">" "\n");
 
+			if (check_bias)
+				std::printf("##" "INFO=<ID=STRANDBIAS,Number=0,Type=Flag,Description=\"Call for a strand biased variant\">" "\n");
+
 			// TODO: print program version/date
 		}
 
@@ -789,6 +833,7 @@ usage:
 		VCFFormatString format{ vcf_reader.format() };
 
 		std::vector<std::array<long, 2> > ad;
+		std::vector<std::array<long, 2> > ad_fb;
 		{
 			for (string_view sample_data : vcf_reader.sample_fields())
 			{
@@ -820,6 +865,15 @@ usage:
 
 				ad.push_back( std::array<long, 2>{ 0, 0 } );
 				parse_counts( ad.back().data(), format.get("AD")  );
+
+				if (check_bias)
+				{
+					long adf[] = { 0, 0 };
+					parse_counts( adf, format.get("ADF") );
+
+					ad_fb.push_back( std::array<long, 2>{ adf[0], adf[1] } );
+					ad_fb.push_back( std::array<long, 2>{ ad.back()[0] - adf[0], ad.back()[1] - adf[1] } );
+				}
 			}
 		}
 
@@ -833,7 +887,11 @@ usage:
 		}
 
 		std::vector<std::array<double, 2*(2+1)/2> > gl{ ad.size() };
-		compute_GL_22( &gl[0][0], &ad[0][0], mut_mask.data(), ad.size(), we, me, approx_taper );
+		bool is_bias = false;
+		if (!check_bias)
+			compute_GL_22( &gl[0][0], &ad[0][0], mut_mask.data(), ad.size(), we, me, approx_taper );
+		else
+			is_bias = compute_GL_22_and_bias( &gl[0][0], &ad[0][0], &ad_fb[0][0], mut_mask.data(), ad.size(), we, me, approx_taper);
 
 		/* for (std::size_t i = 0; i < gl.size(); ++i)
 			std::fprintf(stderr, "sample #%zu GT=%s GL=%g,%g,%g AD=%lu,%lu\n", i+1, compute_GT_22( &gl[i][0] ), gl[i][0], gl[i][1], gl[i][2], ad[i][0], ad[i][1]); */
@@ -872,6 +930,17 @@ usage:
 				info.set( "GERMLINE", "" );
 			else
 				info.unset( "GERMLINE" );
+
+			string_cache.emplace_back( info.str() );
+			vcf_reader.set_info( string_cache.back() );
+		}
+
+		if (check_bias)
+		{
+			if (is_bias)
+				info.set( "STRANDBIAS", "" );
+			else
+				info.unset( "STRANDBIAS" );
 
 			string_cache.emplace_back( info.str() );
 			vcf_reader.set_info( string_cache.back() );
