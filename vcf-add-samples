@@ -108,19 +108,29 @@ def template_format(args):
 
 if __name__ == '__main__':
 	import sys
+	import getopt
 
 	header = False
-	args = sys.argv[1:]
+	invert = False
 
-	if len(args) > 0 and args[0] == '-h':
-		header = True
-		args = args[1:]
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], 'h v')
 
-	if len(args) < 2:
-		sys.stderr.write(f'Usage: { sys.argv[0] } [-h] input.vcf sample [...]' + '\n')
+		if len(args) < 2:
+			raise getopt.GetoptError('not enough input arguments')
+
+		for key, val in opts:
+			if key == '-h':
+				header = True
+			if key == '-v':
+				invert = True
+
+	except getopt.GetoptError as err:
+		sys.stderr.write(f'{ sys.argv[0] }: { err.msg }' + '\n')
+		sys.stderr.write(f'Usage: { sys.argv[0] } [-h] [-v] input.vcf sample [...]' + '\n')
 		sys.exit(1)
 
-	input_fn, use_samples = args[0], args[1:]
+	input_fn, in_samples = args[0], args[1:]
 
 	with gzopen_r(input_fn, 'r') as stream:
 		parser = VCFParser(stream)
@@ -128,6 +138,11 @@ if __name__ == '__main__':
 		if header:
 			for line in parser.comm:
 				sys.stdout.write( line + '\n' )
+
+		if not invert:
+			use_samples = in_samples
+		else:
+			use_samples = [ key for key in parser.head if parser.is_sample_field(key) and not key in in_samples ]
 
 		new_head = [ key for key in parser.head if not parser.is_sample_field(key) ] + use_samples
 		sys.stdout.write( '#' + '\t'.join(new_head) + '\n' )
