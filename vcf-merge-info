@@ -155,6 +155,8 @@ if __name__ == '__main__':
 			if key in ('CHROM', 'POS', 'REF', 'ALT'):
 				assert val1 == val2
 				val = val1
+			elif key == 'FORMAT' or VCFParser.is_sample_field(key):
+				val = ( val1, val1, val2, make_format( parse_format(val1) + parse_format(val2) ) )
 			elif val1 == val2:
 				val = val1
 			elif val2 == '.':
@@ -177,14 +179,27 @@ if __name__ == '__main__':
 
 					val = make_info(info)
 
-				elif key == 'FORMAT':
-					val = make_format( parse_format(val1) + parse_format(val2) )
-				elif VCFParser.is_sample_field(key):
-					val = make_format( parse_format(val1) + parse_format(val2) )
 				else:
 					raise Exception(f'merge not implemented for field {key}')
 
 			line.append(val)
+
+		format_idx = 0
+		for idx, key in enumerate(head):
+			if key == 'FORMAT' or VCFParser.is_sample_field(key):
+				_, val1, val2, _ = line[idx]
+				if val1 == val2:
+					format_idx |= 0
+				elif val2 == '.':
+					format_idx |= 1
+				elif val1 == '.':
+					format_idx |= 2
+				else:
+					format_idx |= 3
+
+		for idx, key in enumerate(head):
+			if key == 'FORMAT' or VCFParser.is_sample_field(key):
+				line[idx] = line[idx][format_idx]
 
 		return line
 
