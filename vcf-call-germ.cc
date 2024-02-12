@@ -642,7 +642,7 @@ compute_GL_22(double *gl, const long *ad, const char *mut_mask, std::size_t samp
 
 	for (std::size_t i = 0; i < samples; ++i)
 		if (mut_mask[i])
-			gtbeta_zap( jl.data(), samples, i, 2*(2+1)/2, 0 );
+			gtbeta_zap( jl.data(), samples, 2*(2+1)/2, i, 0 );
 
 	gtbeta_22_gl( gl, jl.data(), samples );
 }
