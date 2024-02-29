@@ -1,89 +1,6 @@
 
-#define countof(x) \
-	(sizeof((x)) / sizeof(*(x)))
-
-#include <cassert>
-#include <string>
-#include <zlib.h>
-#include <tuple>
-
-namespace {
-
-class GZFile {
-public:
-	explicit GZFile(const char *path, const char *mode = "r")
-		: _file{ ::gzopen(path, mode) }
-	{}
-
-	~GZFile()
-	{
-		if (is_open())
-			close();
-	}
-
-	bool is_open() const
-	{ return _file != nullptr; }
-
-	void close()
-	{
-		assert(is_open());
-
-		std::ignore = ::gzclose(_file);
-		_file = nullptr;
-	}
-
-	bool is_eof() const
-	{
-		assert(is_open());
-		return ::gzeof(_file) != 0;
-	}
-
-	int get()
-	{
-		assert(is_open());
-		return gzgetc(_file);
-	}
-
-	bool getline(std::string& line)
-	{
-		line.clear();
-
-		for (int ch; (ch = gzgetc(_file)) != -1;)
-		{
-			switch (ch)
-			{
-				case '\r':
-					if ((ch = gzgetc(_file)) != -1)
-						;
-					else
-						return is_eof();
-					if (ch == '\n')
-						;
-					else
-						return ::gzungetc(ch, _file) != -1;
-					// FALLTHROUGH
-
-				case '\n':
-					return true;
-
-				default:
-					line.push_back(char(ch));
-					break;
-			}
-		}
-
-		return is_eof() && !line.empty();
-	}
-
-private:
-	GZFile(const GZFile&) = delete;
-	GZFile& operator=(const GZFile&) = delete;
-
-	gzFile _file;
-
-}; // GZFile
-
-} // (anonymous)
+#include "gzfile.hh"
+#include "string_view.hh"
 
 #include <htslib/sam.h>
 
@@ -391,233 +308,7 @@ private:
 
 } // (anonymous)
 
-#include <algorithm>
-#include <cstring>
-#include <string>
-
 namespace {
-
-template<class Type>
-class array_view {
-public:
-	array_view()
-		: array_view(nullptr, nullptr)
-	{}
-
-	array_view(const array_view&) = default;
-
-	array_view(Type *first, Type *last)
-		: _first{first}
-		, _last{last}
-	{}
-
-	array_view& operator=(const array_view&) = default;
-
-	~array_view() = default;
-
-	Type *begin() const
-	{ return _first; }
-
-	Type *end() const
-	{ return _last; }
-
-	int compare(array_view& other) const
-	{
-		return std::lexicographical_compare( other.begin(), other.end(), begin(), end() ) -
-			std::lexicographical_compare( begin(), end(), other.begin(), other.end() );
-	}
-
-private:
-	Type *_first, *_last;
-
-}; // array_view
-
-class string_view : public array_view<const char> {
-public:
-	string_view() = default;
-
-	string_view(const string_view&) = default;
-
-	string_view(const char *first, const char *last)
-		: array_view<const char>{ first, last }
-	{}
-
-	string_view(const std::string& string)
-		: string_view{ string.data(), string.size() }
-	{}
-
-	string_view(const char *data)
-		: string_view{ data, std::strlen(data) }
-	{}
-
-	string_view(const char *data, std::size_t size)
-		: string_view{ &data[0], &data[size] }
-	{}
-
-	string_view& operator=(const string_view&) = default;
-
-	~string_view() = default;
-
-	std::string str() const
-	{ return std::string{ begin(), end() }; }
-
-}; // string_view
-
-} // (anonymous)
-
-#include <string>
-#include <vector>
-
-namespace {
-
-template<class Unsigned, class String>
-static
-bool
-parse_unsigned(Unsigned& value, const String& string)
-{
-	bool empty = true;
-
-	value = 0;
-
-	for (char ch : string)
-	{
-		if (!('0' <= ch && ch <= '9'))
-			return false;
-
-		Unsigned digit = ch - '0';
-		if (!( value <= ( Unsigned(-1) - digit ) / 10 ))
-			return false;
-
-		value = 10 * value + digit;
-		empty = false;
-	}
-
-	return !empty;
-}
-
-template<class String>
-static
-std::vector<string_view>
-tokenize(std::vector<string_view>& fields, const String& line, char sep)
-{
-	fields.clear();
-	fields.emplace_back( &*line.begin(), &*line.begin() );
-
-	for (const char& ch : line)
-		if (ch == sep)
-			fields.emplace_back( &(&ch)[1], &(&ch)[1] );
-		else
-			fields.back() = { fields.back().begin(), &(&ch)[1] };
-
-	return fields;
-}
-
-class VCFReader {
-public:
-	VCFReader()
-		: _line{}
-		, _fields{}
-	{}
-
-	explicit VCFReader(GZFile& file)
-		: VCFReader{}
-	{
-		while (file.getline(_line))
-			if (_line.size() > 0 && _line[0] == '#')
-			{
-				if (_line.size() > 1 && _line[1] == '#')
-					;
-				else
-				{
-					static const char *const expect[] = { "CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO" };
-
-					tokenize(_fields, string_view{ &*_line.begin() + 1, &*_line.end() }, '\t');
-					if (!(_fields.size() >= countof(expect) && std::equal(
-							&expect[0], &expect[countof(expect)], _fields.begin(), [](string_view lhs, string_view rhs)
-							{ return lhs.compare(rhs) == 0; } )))
-					{
-						_throw_error("invalid VCF header");
-						return;
-					}
-
-					break;
-				}
-			}
-			else
-			{
-				_throw_error("missing VCF header");
-				return;
-			}
-	}
-
-	~VCFReader() = default;
-
-	const char *error() const
-	{ return _fields.empty() ? _line.c_str() : nullptr; }
-
-	bool read(GZFile& file)
-	{
-		if (error())
-			return false;
-
-		while (file.getline(_line))
-		{
-			std::size_t width = _fields.size();
-
-			tokenize(_fields, _line, '\t');
-			if (_fields.size() < width)
-				return _throw_error("missing VCF fields");
-			if (_fields.size() > width)
-				return _throw_error("excess VCF fields");
-
-			return true;
-		}
-
-		if (!file.is_eof())
-			return _throw_error("read error");
-
-		return false;
-	}
-
-	string_view chrom() const
-	{ return _fields[0]; }
-
-	string_view pos_str() const
-	{ return _fields[1]; }
-
-	long pos() const
-	{
-		unsigned long pos;
-
-		if (parse_unsigned(pos, pos_str()))
-			return long( pos - 1 );
-		else
-			return -1;
-	}
-
-	string_view ref() const
-	{ return _fields[3]; }
-
-	string_view alt() const
-	{ return _fields[4]; }
-
-protected:
-	bool _throw_error(const char *error)
-	{
-		_line = error;
-		_fields.clear();
-
-		return false;
-	}
-
-private:
-	VCFReader(const VCFReader&) = delete;
-	VCFReader& operator=(const VCFReader&) = delete;
-
-	std::string _line;
-	std::vector<string_view> _fields;
-
-}; // VCFReader
 
 static
 bool
@@ -641,7 +332,7 @@ equal_nt_seq(Iterator1 it1, Iterator1 end1, Iterator2 it2)
 	return true;
 }
 
-static
+static __attribute__((unused))
 string_view
 basename(string_view path)
 {
@@ -657,7 +348,7 @@ basename(string_view path)
 	return string_view{ p, q };
 }
 
-static
+static __attribute__((unused))
 std::pair<string_view, string_view>
 splitext(string_view path)
 {
@@ -670,8 +361,39 @@ splitext(string_view path)
 	return std::make_pair( string_view{ path.begin(), p }, string_view{ p, path.end() } );
 }
 
+static
+std::string&
+string_append_sprintf(std::string& string, const char *format, ...)
+{
+	std::size_t size = string.size();
+	std::size_t free = string.capacity() - size;
+	string.resize( string.capacity() );
+
+	va_list va;
+	va_start(va, format);
+	std::size_t used = std::vsnprintf( &( &*string.begin() )[size], free, format, va );
+	va_end(va);
+
+	if (used + 1 > free)
+	{
+		string.resize( size + used + 1 );
+
+		va_list va;
+		va_start(va, format);
+		used = std::vsnprintf( &( &*string.begin() )[size], used + 1, format, va );
+		va_end(va);
+	}
+
+	string.resize( size + used );
+
+	return string;
+}
+
 } // (anonymous)
 
+#include "ordereddict.hh"
+#include "tempfile.hh"
+#include "vcfreader.hh"
 #include <cstdio>
 #include <cstdlib>
 #include <list>
@@ -680,6 +402,7 @@ splitext(string_view path)
 int
 main(int argc, char **argv)
 {
+	const char *cache_fn = nullptr;
 	bool header = false;
 	bool illumina13 = false;
 	std::uint8_t min_mq = 0;
@@ -688,7 +411,12 @@ main(int argc, char **argv)
 	array_view<const char *const> args{ &argv[1], &argv[argc] };
 
 	for (; args.end() - args.begin() >= 1 && ( *args.begin() )[0] == '-'; args = { args.begin() + 1, args.end() })
-		     if (string_view( *args.begin() ).str() == "-h")
+		     if (string_view( *args.begin() ).str() == "-C")
+		{
+			cache_fn = *( args.begin() + 1 );
+			args = { args.begin() + 1, args.end() };
+		}
+		else if (string_view( *args.begin() ).str() == "-h")
 			header = true;
 		else if (string_view( *args.begin() ).str() == "-6")
 			illumina13 = true;
@@ -712,8 +440,31 @@ main(int argc, char **argv)
 	if (args.end() - args.begin() < 2)
 	{
 usage:
-		std::fprintf(stderr, "Usage: %s [-h] [-6] [-q mq] [-Q bq] input.vcf input.bam [...]" "\n", argv[0]);
+		std::fprintf(stderr, "Usage: %s [-C cache.vcf] [-h] [-6] [-q mq] [-Q bq] input.vcf input.bam [...]" "\n", argv[0]);
 		return EXIT_FAILURE;
+	}
+	
+	std::string cache_head;
+	OrderedDict<std::string, std::string> cache;
+
+	if (cache_fn)
+	{
+		GZFile cache_fp{ cache_fn, "r" };
+		if (cache_fp.is_open())
+		{
+			VCFReader vcf_reader{ cache_fp };
+
+			cache_head = vcf_reader.line().str();
+
+			while (vcf_reader.read(cache_fp))
+				cache.emplace( vcf_reader.non_sample_line().str(), vcf_reader.sample_line().str() );
+
+			if (!cache_fp.is_eof())
+			{
+				std::fprintf(stderr, "%s: %s: %s" "\n", argv[0], cache_fn, "read error");
+				return EXIT_FAILURE;
+			}
+		}
 	}
 
 	const char *vcf_fn = *args.begin();
@@ -757,13 +508,27 @@ usage:
 			// TODO: print program version/date
 		}
 
-		std::printf("#" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s",
+		std::string head;
+
+		string_append_sprintf(head, "#" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s" "\t" "%s",
 			"CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT");
 
 		for (const char *bam_fn : bam_fns)
-			std::printf("\t" "%s", splitext(basename(bam_fn)).first.str().c_str());
+			string_append_sprintf(head, "\t" "%s", splitext(basename(bam_fn)).first.str().c_str());
 
-		std::printf("\n");
+		if (cache_fn)
+		{
+			if (cache.empty())
+				cache_head = head;
+			else
+				if (head != cache_head)
+				{
+					std::fprintf(stderr, "%s: %s: %s" "\n", argv[0], cache_fn, "header mismatch");
+					return EXIT_FAILURE;
+				}
+		}
+
+		std::printf("%s\n", head.c_str());
 	}
 
 	VCFReader vcf_reader{ vcf_fp };
@@ -774,12 +539,16 @@ usage:
 		string_view ref = vcf_reader.ref();
 		string_view alt = vcf_reader.alt();
 
-		std::printf("%.*s" "\t" "%ld" "\t" "." "\t" "%.*s" "\t" "%.*s" "\t" "." "\t" "." "\t" "." "\t" "%s",
+		std::string non_sample_line;
+		string_append_sprintf(non_sample_line, "%.*s" "\t" "%ld" "\t" "." "\t" "%.*s" "\t" "%.*s" "\t" "." "\t" "." "\t" "." "\t" "%s",
 			int( chrom.end() - chrom.begin() ), chrom.begin(),
 			long( pos + 1 ),
 			int( ref.end() - ref.begin() ), ref.begin(),
 			int( alt.end() - alt.begin() ), alt.begin(),
 			"AD" ":" "ADF" /* ":" "ADR" */ ":" "XD" ":" "XDF" /* ":" "XDR" */ ":" "DP" ":" "DPF" /* ":" "DPR" */ ":" "RDP");
+
+		auto process_mut = [&](std::string& line) -> std::string {
+			line.clear();
 
 		for (SAMFile& bam : bams)
 		{
@@ -870,7 +639,7 @@ usage:
 				else
 					++cnt_rej;
 
-			std::printf("\t" "%zu,%zu" ":" "%zu,%zu" /* ":" "%zu,%zu" */ ":" "%zu" ":" "%zu" /* ":" "%zu" */ ":" "%zu" ":" "%zu" /* ":" "%zu" */ ":" "%zu",
+			string_append_sprintf(line, "\t" "%zu,%zu" ":" "%zu,%zu" /* ":" "%zu,%zu" */ ":" "%zu" ":" "%zu" /* ":" "%zu" */ ":" "%zu" ":" "%zu" /* ":" "%zu" */ ":" "%zu",
 				                              cnt[0][1][0] + cnt[0][1][1]                                                                       , // AD REF
 				                                                            cnt[1][0][0] + cnt[1][0][1]                                         , // AD ALT
 				                              cnt[0][1][0]                                                                                      , // ADF REF
@@ -886,13 +655,80 @@ usage:
 				cnt[0][0][0] + cnt[0][0][1] + cnt[0][1][0] + cnt[0][1][1] + cnt[1][0][0] + cnt[1][0][1] + cnt[1][1][0] + cnt[1][1][1] + cnt_rej ); // RDP
 		}
 
-		std::printf("\n");
+			return line;
+		};
+
+		std::string sample_line;
+
+		if (!cache_fn)
+			process_mut(sample_line);
+		else
+		{
+			auto it = cache.find(non_sample_line);
+
+			if (it != cache.end())
+			{
+				// std::fprintf(stderr, "NOTE: line is cache HIT\n");
+
+				sample_line = !it->second.empty() ? ( '\t' + it->second ) : it->second;
+			}
+			else
+			{
+				// std::fprintf(stderr, "NOTE: line is cache MISS\n");
+
+				process_mut(sample_line);
+				cache.emplace(non_sample_line, !sample_line.empty() ? &sample_line.c_str()[1] : sample_line.c_str());
+			}
+		}
+
+		std::printf("%s%s\n", non_sample_line.c_str(), sample_line.c_str());
 	}
 
 	if (!vcf_fp.is_eof())
 	{
 		std::fprintf(stderr, "%s: %s: %s" "\n", argv[0], vcf_fn, vcf_reader.error());
 		return EXIT_FAILURE;
+	}
+
+	if (cache_fn)
+	{
+		TempFile tmp_cache_fn{ ( std::string{cache_fn} + ".XXXXXX" ).c_str() };
+		if (!tmp_cache_fn.is_open())
+		{
+			std::fprintf(stderr, "%s: %s: %s" "\n", "warning", cache_fn, "failed to allocate a temporary file");
+			goto cache_write_failed;
+		}
+
+		{ 
+			GZFile cache_fp{ tmp_cache_fn.fd(), "w" };
+			if (!cache_fp.is_open())
+			{
+				std::fprintf(stderr, "%s: %s: %s" "\n", "warning", tmp_cache_fn.path(), "failed to open for write");
+				goto cache_write_failed;
+			}
+
+			tmp_cache_fn.release_fd();
+
+			cache_fp.putline( cache_head );
+
+			for (const auto& line : cache)
+				cache_fp.putline( line.first + ( !line.second.empty() ? ( '\t' + line.second ) : line.second ) );
+
+			if (cache_fp.is_error())
+			{
+				std::fprintf(stderr, "%s: %s: %s" "\n", "warning", tmp_cache_fn.path(), "write error");
+				goto cache_write_failed;
+			}
+
+			if (rename(tmp_cache_fn.path(), cache_fn) != 0)
+			{
+				std::fprintf(stderr, "%s: %s: %s" "\n", "warning", tmp_cache_fn.path(), "failed to rename");
+				goto cache_write_failed;
+			}
+		}
+
+cache_write_failed:
+		;
 	}
 
 	return EXIT_SUCCESS;

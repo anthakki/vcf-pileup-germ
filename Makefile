@@ -19,15 +19,22 @@ CXXFLAGS += -Weffc++
 
 LIBS += -lpthread
 
-targets = vcf-call-fs vcf-call-germ vcf-pileup vcf-pileup-mt
+targets := $(basename $(wildcard *.cc))
+objects := fishertest.o gtbeta.o jacobi_rule.o $(addsuffix .o,$(targets))
 
 all: $(targets)
 
-clean:
+cleanobj:
+	$(RM) $(objects)
+
+clean: cleanobj
 	$(RM) $(targets)
 
-%: %.cc
+%: %.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+
+%.o: %.cc
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 fishertest.o: fishertest.c fishertest.h
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -38,13 +45,20 @@ gtbeta.o: gtbeta.c gtbeta.h
 jacobi_rule.o: jacobi_rule.c jacobi_rule.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-vcf-call-fs: vcf-call-fs.cc fishertest.o
+vcf-call-fs.o: fishertest.h gzfile.hh string_view.hh vcfreader.hh
+vcf-call-fs: vcf-call-fs.o fishertest.o
 
-vcf-call-germ: vcf-call-germ.cc gtbeta.o jacobi_rule.o
+vcf-call-germ.o: gtbeta.h vcfreader.hh
+vcf-call-germ: vcf-call-germ.o gtbeta.o jacobi_rule.o
 
-vcf-pileup: vcf-pileup.cc
+vcf-pileup.o: gzfile.hh string_view.hh ordereddict.hh tempfile.hh vcfreader.hh
+vcf-pileup: vcf-pileup.o
 
-vcf-pileup-mt: vcf-pileup-mt.cc
+vcf-pileup-mt.o: gzfile.hh string_view.hh vcfreader.hh
+vcf-pileup-mt: vcf-pileup-mt.o
 
-.PHONY: all clean
+vcf-sum-format.o: vcfreader.hh
+vcf-sum-format: vcf-sum-format.o
+
+.PHONY: all cleanobj clean
 .SUFFIXES:
