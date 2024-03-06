@@ -147,6 +147,7 @@ usage:
 			if (vcf_reader.non_sample_line().compare( vcf_readers.front().non_sample_line() ) != 0)
 			{
 				std::fprintf(stderr, "%s: %s: %s" "\n", argv[0], args.begin()[std::distance(vcf_readers.begin(), std::find_if(vcf_readers.begin(), vcf_readers.end(), [&](const VCFReader& lhs){ return &lhs == &vcf_reader; }))], "field data mismatch");
+				return EXIT_FAILURE;
 			}
 
 		std::vector<std::string> new_sample_fields;

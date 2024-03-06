@@ -145,14 +145,13 @@ public:
 						return;
 					}
 
-					break;
+					return; // OK
 				}
 			}
 			else
-			{
-				_throw_error("missing VCF header");
-				return;
-			}
+				break;
+
+		_throw_error("missing VCF header");
 	}
 
 	~VCFReader() = default;
