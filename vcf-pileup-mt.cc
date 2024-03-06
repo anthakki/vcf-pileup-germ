@@ -545,16 +545,15 @@ usage:
 		std::printf("%s\n", head.c_str());
 	}
 
-	std::deque<std::string> in_data;
-	std::size_t in_head = 0;
+	std::deque<std::pair<std::size_t, std::string> > in_data;
 	bool in_done = false;
 	std::mutex in_lock;
 	std::condition_variable in_cond;
 
-	auto push_job = [&](const std::string& line) -> void {
+	auto push_job = [&](std::size_t job, const std::string& line) -> void {
 		std::lock_guard<std::mutex> lock(in_lock);
 
-		in_data.emplace_back(line);
+		in_data.emplace_back(job, line);
 		in_cond.notify_one();
 	};
 
@@ -567,21 +566,18 @@ usage:
 			else
 				return false;
 
-		job = in_head++;
-		line = in_data.front();
+		job = in_data.front().first;
+		line = in_data.front().second;
 		in_data.pop_front();
 
 		return true;
 	};
 
-	auto finish_jobs = [&]() -> std::size_t {
+	auto finish_jobs = [&]() -> void {
 		std::lock_guard<std::mutex> lock(in_lock);
 
-		std::size_t num_jobs = in_head + in_data.size();
 		in_done = true;
 		in_cond.notify_all();
-
-		return num_jobs;
 	};
 
 	std::deque<std::string> out_data;
@@ -799,28 +795,11 @@ usage:
 		}
 	};
 
-	auto push_through = [&](const std::string& line) -> void {
-		std::size_t job;
-		{
-		std::lock_guard<std::mutex> lock(in_lock);
-
-		job = in_head++;
-		}
-		{
-		std::lock_guard<std::mutex> lock(out_lock);
-
-		std::size_t idx = job - out_head;
-		if (!( idx < out_data.size() ))
-			out_data.resize( idx + 1 );
-		out_data[idx] = line;
-		}
-	};
-
 	std::list<std::thread> threads;
 	for (unsigned i = 0; i < num_threads; ++i)
 		threads.emplace_back( worker );
 
-	std::size_t fin_jobs = 0;
+	std::size_t job = 0, fin_jobs = 0;
 	std::string line;
 	
 	auto output_line = [&](const std::string& line) {
@@ -840,7 +819,7 @@ usage:
 		if (!cache_fn)
 		{
 			line = vcf_reader.line().str();
-			push_job( line );
+			push_job( job++, line );
 		}
 		else
 		{
@@ -854,14 +833,14 @@ usage:
 				// std::fprintf(stderr, "NOTE: line is cache HIT\n");
 
 				line = non_sample_line + ( !it->second.empty() ? ( '\t' + it->second ) : it->second );
-				push_through( line );
+				push_out( job++, line );
 			}
 			else
 			{
 				// std::fprintf(stderr, "NOTE: line is cache MISS\n");
 
 				line = vcf_reader.line().str();
-				push_job( line );
+				push_job( job++, line );
 			}
 		}
 
@@ -870,9 +849,9 @@ usage:
 	}
 
 	{
-		std::size_t num_jobs = finish_jobs();
+		finish_jobs();
 
-		for (; fin_jobs < num_jobs && pop_out(line); ++fin_jobs)
+		for (; fin_jobs < job && pop_out(line); ++fin_jobs)
 			output_line(line);
 	}
 
